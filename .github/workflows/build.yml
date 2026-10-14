@@ -3,28 +3,42 @@ on: [push, pull_request, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [autotools, cmake]
+
     steps:
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          ocaml ocamlbuild libnum-ocaml-dev \
-          autoconf automake indent libtool fig2dev \
+          ocaml ocamlbuild ocaml-findlib libnum-ocaml-dev \
+          python3 autoconf automake indent libtool fig2dev \
           cmake ninja-build gfortran libmpich-dev
 
     - name: Checkout
       uses: actions/checkout@v6
 
-    - name: Bootstrap
-      run: sh bootstrap.sh
+    - name: Generate sources
+      run: python3 support/code_generation.py -j $(nproc)
 
-    - name: Build (Autotools & Code generation)
+    - name: Configure (Autotools)
+      if: ${{ matrix.build == 'autotools'}}
+      run: |
+        ./autogen.sh
+        ./configure --disable-shared --enable-maintainer-mode --enable-openmp
+
+    - name: Build (Autotools)
+      if: ${{ matrix.build == 'autotools'}}
       run: make all -j $(nproc)
 
     - name: Test (Autotools)
+      if: ${{ matrix.build == 'autotools'}}
       run: make -C tests smallcheck -j $(nproc)
 
     - name: Configure (CMake)
+      if: ${{ matrix.build == 'cmake'}}
       run: |
         cmake -B build -G Ninja \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -39,12 +53,15 @@ jobs:
           -DENABLE_THREADS=ON
 
     - name: Build (CMake)
-      run: cmake --build build --target install -j $(nproc)
+      if: ${{ matrix.build == 'cmake'}}
+      run: cmake --build build --target install -j $(nproc) --verbose
 
     - name: Test (CMake)
+      if: ${{ matrix.build == 'cmake'}}
       run: ctest --test-dir build --output-on-failure -j $(nproc)
 
     - name: Check CMake package
+      if: ${{ matrix.build == 'cmake'}}
       run: |
         mkdir consumer
         cat > consumer/CMakeLists.txt <<'EOF'

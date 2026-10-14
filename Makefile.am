@@ -4,12 +4,8 @@ lib_LTLIBRARIES = libfftw3@PREC_SUFFIX@.la
 # pkgincludedir = $(includedir)/fftw3@PREC_SUFFIX@
 # nodist_pkginclude_HEADERS = config.h
 
-# recompile genfft if maintainer mode is true
 if MAINTAINER_MODE
-GENFFT = genfft
 EXTRA_libfftw3@PREC_SUFFIX@_la_DEPENDENCIES = assert-shared-version-info
-else
-GENFFT =
 endif
 
 ACLOCAL_AMFLAGS=-I m4
@@ -39,9 +35,9 @@ else
 DOCDIR=
 endif
 
-SUBDIRS=support $(GENFFT) kernel simd-support dft rdft reodft api	\
+SUBDIRS=support genfft kernel simd-support dft rdft reodft api	\
 libbench2 $(CHICKEN_EGG) tests mpi $(DOCDIR) tools m4
-EXTRA_DIST=COPYRIGHT bootstrap.sh CONVENTIONS fftw.pc.in	\
+EXTRA_DIST=COPYRIGHT autogen.sh mkdist.sh CONVENTIONS fftw.pc.in	\
 CMakeLists.txt cmake/cmake.config.h.in FFTW3Config.cmake.in		\
 FFTW3ConfigVersion.cmake.in README-perfcnt.md \
 cmake/CMakeLists.txt cmake/checks.cmake cmake/fortran.cmake cmake/simd.cmake \
