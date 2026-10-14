@@ -18,8 +18,8 @@ import sys
 import tempfile
 
 
-# Keep this first standalone implementation equivalent to the existing
-# Makefile.am recipes. Each entry is (name, generator, arguments, sizes).
+# Each entry is (name, generator, arguments, sizes). Edit sizes here to
+# customize the codelets; empty lists retain optional generator families.
 # Order matters: codlist.c uses this order when registering solvers.
 RECIPES = {
     "dft/scalar/codelets": [
@@ -32,9 +32,19 @@ RECIPES = {
         ("t2", "gen_twiddle",
          "-compact -variables 4 -pipeline-latency 4 -twiddle-log3 -precompute-twiddles -n {n} -name t2_{n} -include dft/scalar/t.h",
          [4, 8, 16, 32, 64, 5, 10, 20, 25]),
+        ("f1", "gen_twiddle",
+         "-compact -variables 4 -pipeline-latency 4 -dif -n {n} -name f1_{n} -include dft/scalar/f.h",
+         []),
+        ("f2", "gen_twiddle",
+         "-compact -variables 4 -pipeline-latency 4 -twiddle-log3 -precompute-twiddles -dif -n {n} -name f2_{n} -include dft/scalar/f.h",
+         []),
+        # The q codelets grow quadratically; use small sizes (normally <= 8).
         ("q1", "gen_twidsq",
          "-compact -variables 4 -pipeline-latency 4 -reload-twiddle -dif -n {n} -name q1_{n} -include dft/scalar/q.h",
          [2, 4, 8, 3, 5, 6]),
+        ("q2", "gen_twidsq",
+         "-compact -variables 4 -pipeline-latency 4 -twiddle-log3 -precompute-twiddles -dif -n {n} -name q2_{n} -include dft/scalar/q.h",
+         []),
     ],
     "rdft/scalar/r2cf": [
         ("r2cf", "gen_r2cf",
@@ -89,12 +99,33 @@ RECIPES = {
          [4, 8, 16, 32, 20]),
     ],
     "rdft/scalar/r2r": [
+        ("e00", "gen_r2r",
+         "-compact -variables 4 -pipeline-latency 4 -redft00 -n {n} -name e00_{n} -include rdft/scalar/r2r.h",
+         []),
         ("e01", "gen_r2r",
          "-compact -variables 4 -pipeline-latency 4 -redft01 -n {n} -name e01_{n} -include rdft/scalar/r2r.h",
          [8]),
         ("e10", "gen_r2r",
          "-compact -variables 4 -pipeline-latency 4 -redft10 -n {n} -name e10_{n} -include rdft/scalar/r2r.h",
          [8]),
+        ("e11", "gen_r2r",
+         "-compact -variables 4 -pipeline-latency 4 -redft11 -n {n} -name e11_{n} -include rdft/scalar/r2r.h",
+         []),
+        ("o00", "gen_r2r",
+         "-compact -variables 4 -pipeline-latency 4 -rodft00 -n {n} -name o00_{n} -include rdft/scalar/r2r.h",
+         []),
+        ("o01", "gen_r2r",
+         "-compact -variables 4 -pipeline-latency 4 -rodft01 -n {n} -name o01_{n} -include rdft/scalar/r2r.h",
+         []),
+        ("o10", "gen_r2r",
+         "-compact -variables 4 -pipeline-latency 4 -rodft10 -n {n} -name o10_{n} -include rdft/scalar/r2r.h",
+         []),
+        ("o11", "gen_r2r",
+         "-compact -variables 4 -pipeline-latency 4 -rodft11 -n {n} -name o11_{n} -include rdft/scalar/r2r.h",
+         []),
+        ("dht", "gen_r2r",
+         "-compact -variables 4 -pipeline-latency 4 -dht -sign 1 -n {n} -name dht_{n} -include rdft/scalar/r2r.h",
+         []),
     ],
     "dft/simd/common": [
         ("n1fv", "gen_notw_c",
@@ -159,13 +190,14 @@ RECIPES = {
     ],
 }
 
-SOLVTABS = {
-    "dft/scalar/codelets": "solvtab_dft_standard",
-    "rdft/scalar/r2cf": "solvtab_rdft_r2cf",
-    "rdft/scalar/r2cb": "solvtab_rdft_r2cb",
-    "rdft/scalar/r2r": "solvtab_rdft_r2r",
-    "dft/simd/common": "solvtab_dft",
-    "rdft/simd/common": "solvtab_rdft",
+# Solver table symbol and Automake source-list variable for each group.
+GROUPS = {
+    "dft/scalar/codelets": ("solvtab_dft_standard", "DFT_SCALAR_CODELETS"),
+    "rdft/scalar/r2cf": ("solvtab_rdft_r2cf", "RDFT_R2CF_CODELETS"),
+    "rdft/scalar/r2cb": ("solvtab_rdft_r2cb", "RDFT_R2CB_CODELETS"),
+    "rdft/scalar/r2r": ("solvtab_rdft_r2r", "RDFT_R2R_CODELETS"),
+    "dft/simd/common": ("solvtab_dft", "DFT_SIMD_CODELETS"),
+    "rdft/simd/common": ("solvtab_rdft", "RDFT_SIMD_CODELETS"),
 }
 
 SIMD_HEADERS = {
@@ -243,6 +275,7 @@ def expected_files():
             paths.extend(Path(kind) / "simd" / isa / name
                          for name in common + ["codlist.c", "genus.c"])
     paths.extend(map(Path, INTERFACES))
+    paths.append(Path("support/codelets.mk"))
     return paths
 
 
@@ -270,7 +303,7 @@ def check_files(root):
 
 
 def build_generators(root, jobs):
-    generators = sorted({generator for _, generator, _ in codelets()}
+    generators = sorted({entry[1] for recipes in RECIPES.values() for entry in recipes}
                         | {"gen_mdct"})
     print("Building {} OCaml generators...".format(len(generators)), flush=True)
     run(["ocamlbuild", "-classic-display", "-j", str(jobs), "-pkgs", "num"]
@@ -333,9 +366,14 @@ def generate_codelets(root, jobs, force, indent):
 
 
 def generate_tables_and_wrappers(root):
-    for directory, solvtab in SOLVTABS.items():
+    manifest = "# Generated automatically. Edit support/code_generation.py instead.\n"
+    for directory, (solvtab, variable) in GROUPS.items():
         names = [path.stem for path, _, _ in codelets()
                  if path.parent == Path(directory)]
+        manifest += "\n" + variable + " ="
+        for name in names:
+            manifest += " \\\n    " + name + ".c"
+        manifest += "\n"
         simd = directory.endswith("/simd/common")
         rename = "XSIMD" if simd else "X"
         text = '#include "kernel/ifftw.h"\n'
@@ -355,6 +393,7 @@ def generate_tables_and_wrappers(root):
                             '#define SIMD_HEADER "simd-support/{}"\n'
                             '#include "../common/{}.c"\n').format(header, name)
                     write_file(root / Path(directory).parent / isa / (name + ".c"), text)
+    write_file(root / "support/codelets.mk", manifest)
 
 
 def generate_interfaces(root):
